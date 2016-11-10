@@ -1,0 +1,19 @@
+﻿Flappy Birds AI with PyGame Implementation
+
+
+To begin this project from the base implementation of Flappy Birds, I needed to restructure the recurring events in the while loop in order to inject state representation and automatic flapping. I decided to use a timer that functioned much like the pipe appending interval. I wasn’t sure at first how precise to make my states so I erred on the side of states that were too vague. My first attempt was with states that only included the y coordinate or height of the bird and the pipe number. I figured that since the bird will learn to maintain a height that corresponds with the height it will need to be around in order to sneak through the pipe hole, it might not need a distance from the pipe. This approach turned out to be fruitless because one of the ways to get through the pipes with the largest margin of error allowed is by falling diagonally down through and then once in between the two pipes flapping to prevent collision with the bottom pipe. This method only became possible with my second approach with also took the x coordinate or distance from the pipe into account as well. This approach was good because I was immediately able to tell that it was trying new things and not doing the same action as it began an actual path. Using only the height didn’t appear to show this behavior. The more I watched the AI perform, however, the more I realized the states were being rounded too roughly. State action pairs that should have been rewarded were absorbing locations that might have received a punishment instead of the reward. I more finely tuned the states and let the training happen for a longer period of time and I ended up with much better results.
+
+
+Another portion that required a high amount of fine tuning was the amount of exploring that I wanted my AI to do. At first I thought higher exploration rates might increase the speed at which it learns to get through the pipe. This did turn out to be true, but it also led to my AI not being able to consistently repeat what it had learned since the exploration step would kick in too frequently and take me off path. I considered only exploring when there is only under a particular threshold in the qtable but didn’t have enough time to get that deep into the precise values. I also had failed to realize at first that I needed to balance the exploration rate with the state interval because flapping has a given trajectory no matter when it happens. And if there are more states for the same distance, you are more likely to flap more often then.
+
+
+The final variable that I tinkered with was the gamma value. This basically just came down to trial and error for me. 0.3 ended up giving me the best result. I have a hard time explaining why it did so significantly better than all of the other values that I tried.
+
+
+My training took approximately 4 hours or so. I left it one and made it train for the different pipe configurations and orders in order to make the training more robust. I would probably decrease the exploration rate after I start getting higher and higher states filled in in the qtable since you know more about the world and can make an accurate decision without having to guess.
+
+
+You don’t need to do more than have the qtable.p file in the same directory as my code that you will be running in order to load my trained bird.
+
+
+I collaborated with nobody on this project.

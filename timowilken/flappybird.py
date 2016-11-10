@@ -4,8 +4,11 @@
 
 import math
 import os
+import pickle
 from random import randint
 from collections import deque
+from collections import OrderedDict
+import random
 
 import pygame
 from pygame.locals import *
@@ -15,6 +18,22 @@ FPS = 60
 ANIMATION_SPEED = 0.18  # pixels per millisecond
 WIN_WIDTH = 284 * 2     # BG image size: 284x512 px; tiled twice
 WIN_HEIGHT = 512
+STATE_INTERVAL = 50
+pipeval = 4
+EXPLORATION_RATE = .97
+ADVANCEMENT_RATE = .01
+TIE_FLAP_RATE = 0.001
+BOTTOM_PUNISHMENT = -150
+TOP_PUNISHMENT = -150
+PIPE_PUNISHMENT = -150
+GAMMA = 0.3
+PIPE_REWARD = 150
+
+class State():
+    def __init__(self, height, distance, top_tube):
+        self.height = height
+        self.distance = distance
+        self.top_tube = top_tube
 
 
 class Bird(pygame.sprite.Sprite):
@@ -180,7 +199,11 @@ class PipePair(pygame.sprite.Sprite):
              3 * PipePair.PIECE_HEIGHT) /  # 2 end pieces + 1 body piece
             PipePair.PIECE_HEIGHT          # to get number of pipe pieces
         )
-        self.bottom_pieces = randint(1, total_pipe_body_pieces)
+        #self.bottom_pieces = randint(1, total_pipe_body_pieces)
+        global pipeval
+        pipeval += 1
+        pipeval = pipeval % total_pipe_body_pieces
+        self.bottom_pieces = pipeval
         self.top_pieces = total_pipe_body_pieces - self.bottom_pieces
 
         # bottom pipe
@@ -329,6 +352,18 @@ def main():
     frame_clock = 0  # this counter is only incremented if the game isn't paused
     score = 0
     done = paused = False
+
+    t = 0
+
+    q_table = pickle.load(open("qtable.p", "rb"))
+    old_state_action = None
+    reward = 0
+    alpha = 1
+    n_action = {}
+    do_state = 1
+    collision = False
+    max_pipes = 0
+
     while not done:
         clock.tick(FPS)
 
@@ -342,19 +377,15 @@ def main():
             if e.type == QUIT or (e.type == KEYUP and e.key == K_ESCAPE):
                 done = True
                 break
-            elif e.type == KEYUP and e.key in (K_PAUSE, K_p):
-                paused = not paused
-            elif e.type == MOUSEBUTTONUP or (e.type == KEYUP and
-                    e.key in (K_UP, K_RETURN, K_SPACE)):
-                bird.msec_to_climb = Bird.CLIMB_DURATION
+        #     elif e.type == KEYUP and e.key in (K_PAUSE, K_p):
+        #         paused = not paused
+        #     elif e.type == MOUSEBUTTONUP or (e.type == KEYUP and
+        #             e.key in (K_UP, K_RETURN, K_SPACE)):
+        #         #print("Fake flap")
+        #         bird.msec_to_climb = Bird.CLIMB_DURATION
 
         if paused:
             continue  # don't draw anything
-
-        # check for collisions
-        pipe_collision = any(p.collides_with(bird) for p in pipes)
-        if pipe_collision or 0 >= bird.y or bird.y >= WIN_HEIGHT - Bird.HEIGHT:
-            done = True
 
         for x in (0, WIN_WIDTH / 2):
             display_surface.blit(images['background'], (x, 0))
@@ -373,6 +404,10 @@ def main():
         for p in pipes:
             if p.x + PipePair.WIDTH < bird.x and not p.score_counted:
                 score += 1
+                reward = PIPE_REWARD
+                print("reward became ", reward)
+                if score > max_pipes:
+                    max_pipes += score
                 p.score_counted = True
 
         score_surface = score_font.render(str(score), True, (255, 255, 255))
@@ -381,6 +416,111 @@ def main():
 
         pygame.display.flip()
         frame_clock += 1
+
+        # COLLISION
+        collision = False
+        pipe_collision = any(p.collides_with(bird) for p in pipes)
+        if pipe_collision or 0 >= bird.y or bird.y >= WIN_HEIGHT - Bird.HEIGHT:
+            #removes randomness for pipes
+            global pipeval
+            pipeval = 4
+            print("DEATH!!!!!, maxpipes: ", max_pipes)
+            for key in q_table:
+                print(key, ": ", q_table[key])
+            collision = True
+            if pipe_collision:
+                collision_punishment = PIPE_PUNISHMENT
+            elif 0 >= bird.y:
+                print("Top punishment")
+                collision_punishment = TOP_PUNISHMENT
+            else:
+                print("Bottom punishment")
+                collision_punishment = BOTTOM_PUNISHMENT
+            #end removing randomness for pipes
+
+            pygame.init()
+
+            display_surface = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT))
+            pygame.display.set_caption('Pygame Flappy Bird')
+
+            clock = pygame.time.Clock()
+            score_font = pygame.font.SysFont(None, 32, bold=True)  # default font
+            images = load_images()
+
+            # the bird stays in the same x position, so bird.x is a constant
+            # center bird on screen
+            bird = Bird(50, int(WIN_HEIGHT/2 - Bird.HEIGHT/2), 2,
+                        (images['bird-wingup'], images['bird-wingdown']))
+
+            pipes = deque()
+
+            frame_clock = 0  # this counter is only incremented if the game isn't paused
+            score = 0
+            done = paused = False
+            do_state = 0
+            pickle.dump( q_table, open( "qtable.p", "wb" ) )
+
+        if collision or not (paused or frame_clock % msec_to_frames(STATE_INTERVAL) or bird.msec_to_climb > 0):
+            if collision:
+                reward = collision_punishment
+                print("Collision: ", reward)
+            else:
+                t += 1
+                reward += ADVANCEMENT_RATE
+
+            if len(pipes) == 0:
+                x = 600
+                top_pieces = 6
+            else:
+                x = pipes[len(pipes)-1].x - (pipes[len(pipes)-1].x % 20)
+                top_pieces = pipes[len(pipes)-1].top_pieces
+            y = bird.y - (bird.y % 20)
+
+            # GET NEW STATE AND INIT Q_TABLE VALUE
+            state = (x, y, top_pieces)
+            print("Bird at ", state, " top pieces: ", top_pieces)
+            #state = (y, top_pieces)
+            state_action = None
+            if (state, 1) not in q_table:
+                q_table[(state, 1)] = 0
+            if (state, 0) not in q_table:
+                q_table[(state, 0)] = 0
+
+            # MAXIMIZE ACTION
+            if q_table[(state, 0)] > q_table[(state, 1)]:
+                state_action = (state, 0)
+            elif q_table[(state, 0)] < q_table[(state, 1)]:
+                state_action = (state, 1)
+            else:
+                print("TIE!!!")
+                if random.random() > TIE_FLAP_RATE:
+                    state_action = (state, 0)
+                else:
+                    state_action = (state, 1)
+            if random.random() > EXPLORATION_RATE:
+                print("EXPLORE: changed ", state_action[1])
+                state_action = (state, (state_action[1] + 1) % 2)
+                print(state_action[1])
+            if state_action in n_action:
+                n_action[state_action] += 1
+            else:
+                n_action[state_action] = 1
+
+            #do stuff that uses old and new states here
+            if old_state_action != None:
+                #print("old_state_action was not None reward: ", reward)
+
+                print("REWARD ", reward)
+                q_sample = reward + GAMMA * q_table[state_action]
+                alpha = 1 / n_action[old_state_action]
+                #print("alpha: ", alpha)
+                q_table[old_state_action] = q_table[old_state_action] + alpha * (q_sample - q_table[old_state_action])
+                reward = 0
+            #print("old: ", old_state_action, " new: ", state_action)
+            old_state_action = state_action
+            if old_state_action[1] == 1:
+                bird.msec_to_climb = Bird.CLIMB_DURATION
+
     print('Game over! Score: %i' % score)
     pygame.quit()
 
